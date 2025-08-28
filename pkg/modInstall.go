@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync" // 导入 sync 包
 )
 
 type FileEntry struct {
@@ -23,6 +24,7 @@ type FileEntry struct {
 
 type ModList struct {
 	Files []FileEntry `json:"files"`
+	Name  string      `json:"name"`
 }
 
 // 下载文件
@@ -77,26 +79,16 @@ func sha512sum(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func Install(modFilePath string, outDir string) error {
-
-	file, err := os.Open(modFilePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	var modList ModList
-	if err := json.NewDecoder(file).Decode(&modList); err != nil {
-		return err
-	}
-
-	for _, f := range modList.Files {
+// worker 是一个工作协程，负责处理单个文件的下载和校验任务
+func worker(id int, tasks <-chan FileEntry, wg *sync.WaitGroup, outDir string) {
+	defer wg.Done()
+	for f := range tasks {
 		success := false
 		newPath := outDir + "/" + f.Path
 		for _, url := range f.Downloads {
-			log.Println("尝试下载:", url)
+			log.Printf("Worker %d: 尝试下载: %s\n", id, url)
 			if err := downloadFile(url, newPath); err != nil {
-				log.Println("下载失败:", err)
+				log.Printf("Worker %d: 下载失败: %v\n", id, err)
 				continue
 			}
 
@@ -104,16 +96,52 @@ func Install(modFilePath string, outDir string) error {
 			sha512Val, _ := sha512sum(newPath)
 
 			if sha1Val == f.Hashes.SHA1 && sha512Val == f.Hashes.SHA512 {
-				log.Println("校验通过:", newPath)
+				log.Printf("Worker %d: 校验通过: %s\n", id, newPath)
 				success = true
 				break
 			} else {
-				log.Println("校验失败，尝试下一个 URL")
+				log.Printf("Worker %d: 校验失败，尝试下一个 URL\n", id)
 			}
 		}
 		if !success {
-			log.Println("下载或校验失败:", newPath)
+			log.Printf("Worker %d: 下载或校验失败: %s\n", id, newPath)
 		}
 	}
-	return nil
+}
+
+func Install(modFilePath string, outDir string) (string, error) {
+	file, err := os.Open(modFilePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	var modList ModList
+	if err := json.NewDecoder(file).Decode(&modList); err != nil {
+		return "", err
+	}
+	outDir = outDir + "/" + modList.Name
+	// 确定并发数
+	numWorkers := 8
+	tasks := make(chan FileEntry, len(modList.Files))
+	var wg sync.WaitGroup
+
+	// 启动工作协程
+	for i := 1; i <= numWorkers; i++ {
+		wg.Add(1)
+		go worker(i, tasks, &wg, outDir)
+	}
+
+	// 将所有任务发送到通道
+	for _, f := range modList.Files {
+		tasks <- f
+	}
+
+	// 关闭通道，告诉工作协程没有更多任务了
+	close(tasks)
+
+	// 等待所有任务完成
+	wg.Wait()
+
+	return outDir, nil
 }

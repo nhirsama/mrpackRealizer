@@ -9,12 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nhirsama/PCL2PackRealizer/pkg"
 )
 
-var buildModle string
+var buildMode string
 
-// TODO:首先读取命令行参数，-m pcl包整合包位置 -o 输出位置
-// TODO： 之后根据pcl整合包解压并输出到临时目录，遍历配置文件并下载。
 func unZip(packPath string, dest string) ([]string, error) {
 
 	var filenames []string
@@ -62,9 +62,11 @@ func unZip(packPath string, dest string) ([]string, error) {
 		_, err = io.Copy(outFile, rc)
 
 		// 关闭两个文件，并检查关闭时可能发生的写入错误。
-		outFile.Close()
-		rc.Close()
-
+		err = outFile.Close()
+		if err != nil {
+			return filenames, err
+		}
+		err = rc.Close()
 		if err != nil {
 			return filenames, err
 		}
@@ -75,7 +77,7 @@ func main() {
 	var packPath, outPath string
 	flag.StringVar(&packPath, "m", "./modpack.mrpack", "pcl整合包所在路径")
 	flag.StringVar(&outPath, "o", "./", "实例化后所在路径")
-	flag.StringVar(&buildModle, "debug", "release", "编译模式")
+	flag.StringVar(&buildMode, "debug", "release", "编译模式")
 	flag.Parse()
 
 	var tempUnzipDir string
@@ -98,7 +100,7 @@ func main() {
 		}
 		log.Printf("已将位于 %s 的zip归档文件解压至 %s \n", packPath, tempOutputDir)
 		for _, file := range fileName {
-			if buildModle == "debug" {
+			if buildMode == "debug" {
 				log.Println(file)
 			}
 			if filepath.Ext(file) == ".mrpack" {
@@ -119,5 +121,20 @@ func main() {
 			log.Println(err)
 		}
 	}(tempUnzipDir)
+	fileName, err := unZip(packPath, tempUnzipDir+"/unpack")
+	if err != nil {
+		log.Fatalf("解包%s失败，错误信息：%s\n", packPath, err)
+	}
+	if buildMode == "debug" {
+		log.Printf("解包后文件目录如下：")
+		for _, file := range fileName {
+			log.Println(file)
+		}
+	}
+
+	outPath, err = pkg.Install(tempUnzipDir+"/unpack/modrinth.index.json", outPath)
+	if err != nil {
+		log.Printf("下载 mod 清单失败，错误信息：%s\n", err)
+	}
 
 }
