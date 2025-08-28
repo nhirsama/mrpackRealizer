@@ -24,7 +24,12 @@ func unZip(packPath string, dest string) ([]string, error) {
 	if err != nil {
 		return filenames, err
 	}
-	defer r.Close()
+	defer func(r *zip.ReadCloser) {
+		err := r.Close()
+		if err != nil {
+
+		}
+	}(r)
 
 	for _, f := range r.File {
 		fpath := filepath.Join(dest, f.Name)
@@ -36,7 +41,10 @@ func unZip(packPath string, dest string) ([]string, error) {
 		filenames = append(filenames, fpath)
 		// 如果是目录，则创建并跳到下一个文件。
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
+			err := os.MkdirAll(fpath, os.ModePerm)
+			if err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -54,7 +62,10 @@ func unZip(packPath string, dest string) ([]string, error) {
 		// 打开 zip 存档中的文件进行读取。
 		rc, err := f.Open()
 		if err != nil {
-			outFile.Close()
+			err := outFile.Close()
+			if err != nil {
+				return nil, err
+			}
 			return filenames, err
 		}
 
@@ -121,7 +132,7 @@ func main() {
 			log.Println(err)
 		}
 	}(tempUnzipDir)
-	fileName, err := unZip(packPath, tempUnzipDir+"/unpack")
+	fileName, err := unZip(packPath, filepath.Join(tempUnzipDir, "unpack"))
 	if err != nil {
 		log.Fatalf("解包%s失败，错误信息：%s\n", packPath, err)
 	}
@@ -132,9 +143,13 @@ func main() {
 		}
 	}
 
-	outPath, err = pkg.Install(tempUnzipDir+"/unpack/modrinth.index.json", outPath)
+	outPath, err = pkg.Install(filepath.Join(tempUnzipDir, "unpack/modrinth.index.json"), outPath)
 	if err != nil {
 		log.Printf("下载 mod 清单失败，错误信息：%s\n", err)
 	}
-
+	log.Printf("正在复制overrides文件")
+	err = pkg.CopyDir(filepath.Join(tempUnzipDir, "unpack/overrides"), filepath.Join(outPath))
+	if err != nil {
+		log.Printf("复制 %s 至 %s 失败，错误信息%s\n", filepath.Join(tempUnzipDir, "unpack/overrides"), filepath.Join(outPath))
+	}
 }

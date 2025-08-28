@@ -1,3 +1,3 @@
-module github.com/nhirsama/PCL2PackRealizer
+module github.com/nhirsama/mrpackRealizer
 
 go 1.24

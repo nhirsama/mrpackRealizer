@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync" // 导入 sync 包
+	"sync"
 )
 
 type FileEntry struct {
@@ -33,15 +33,28 @@ func downloadFile(url string, path string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
 
-	os.MkdirAll(filepath.Dir(path), 0755)
+		}
+	}(resp.Body)
+
+	err = os.MkdirAll(filepath.Dir(path), 0755)
+	if err != nil {
+		return err
+	}
 
 	out, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func(out *os.File) {
+		err := out.Close()
+		if err != nil {
+			log.Println(err)
+		}
+	}(out)
 
 	_, err = io.Copy(out, resp.Body)
 	return err
@@ -53,7 +66,12 @@ func sha1sum(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			log.Println(err)
+		}
+	}(f)
 
 	h := sha1.New()
 	_, err = io.Copy(h, f)
@@ -69,7 +87,12 @@ func sha512sum(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			log.Println(err)
+		}
+	}(f)
 
 	h := sha512.New()
 	_, err = io.Copy(h, f)
@@ -85,6 +108,17 @@ func worker(id int, tasks <-chan FileEntry, wg *sync.WaitGroup, outDir string) {
 	for f := range tasks {
 		success := false
 		newPath := outDir + "/" + f.Path
+
+		if _, err := os.Stat(newPath); err == nil {
+			log.Printf("发现位于%s的文件存在", newPath)
+			sha1Val, _ := sha1sum(newPath)
+			sha512Val, _ := sha512sum(newPath)
+			if sha1Val == f.Hashes.SHA1 && sha512Val == f.Hashes.SHA512 {
+				log.Printf("Worker %d: 校验通过: %s\n", id, newPath)
+				continue
+			}
+		}
+
 		for _, url := range f.Downloads {
 			log.Printf("Worker %d: 尝试下载: %s\n", id, url)
 			if err := downloadFile(url, newPath); err != nil {
@@ -114,7 +148,12 @@ func Install(modFilePath string, outDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Println(err)
+		}
+	}(file)
 
 	var modList ModList
 	if err := json.NewDecoder(file).Decode(&modList); err != nil {
