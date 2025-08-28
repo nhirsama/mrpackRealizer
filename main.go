@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nhirsama/PCL2PackRealizer/pkg"
+	"github.com/nhirsama/mrpackRealizer/pkg"
 )
 
 var buildMode string
